@@ -38,4 +38,4 @@ Contract sizing tests:
   Price = -1 → Contracts = 0
 
 ```
-<!-- updated: 2026-04-28-03 -->
+<!-- updated: 2023-05-03-r01 -->
