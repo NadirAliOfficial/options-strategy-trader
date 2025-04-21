@@ -28,6 +28,13 @@ Edit the `CONFIG` section in `strategy.py` for symbol and IB connection paramete
 python strategy.py
 ```
 
-## License
-MIT
-``` 
+## Output
+```bash
+Trigger found at: 2025-04-21 07:20:00+00:00
+
+Contract sizing tests:
+  Price = 2.5 → Contracts = 40
+  Price = 0 → Contracts = 0
+  Price = -1 → Contracts = 0
+
+```
