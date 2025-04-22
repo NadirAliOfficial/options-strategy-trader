@@ -1,48 +1,124 @@
+# strategy.py
+
 import pandas as pd
-from datetime import datetime
+import math
 import pytz
+from datetime import datetime, timedelta
+from ib_insync import IB, Stock, Option, MarketOrder, util
 
-# ---------------- Milestone 1: Strategy Logic & Candle Validation ----------------
+# ------------------ CONFIG ------------------
+SYMBOL = 'AAPL'
+POSITION_USD = 10000
+IGNORE_MINUTES = 15
+OTM_THRESHOLD = 1.0
+EXP_DAYS_AHEAD = 1
+TIMEZONE = 'US/Mountain'
+IB_HOST = '127.0.0.1'
+IB_PORT = 7497
+IB_CLIENT_ID = 1
+# --------------------------------------------
 
-IGNORE_MINUTES = 15  # ignore first 15 minutes
+def connect_ib():
+    ib = IB()
+    ib.connect(IB_HOST, IB_PORT, clientId=IB_CLIENT_ID)
+    return ib
+
+def get_5min_bars(ib):
+    """
+    Fetches 1 day of 5‑minute bars for SYMBOL (useRTH).
+    """
+    contract = Stock(SYMBOL, 'SMART', 'USD')
+    bars = ib.reqHistoricalData(
+        contract,
+        endDateTime='',
+        durationStr='1 D',
+        barSizeSetting='5 mins',
+        whatToShow='TRADES',
+        useRTH=True,
+        formatDate=1
+    )
+    df = util.df(bars)
+    df.index = pd.to_datetime(df.date).tz_localize('UTC')
+    return df[['open', 'high', 'low', 'close']]
 
 def filter_bars(df):
-    """Filter out the first IGNORE_MINUTES from the start of the DataFrame."""
     cutoff = df.index[0] + pd.Timedelta(minutes=IGNORE_MINUTES)
     return df[df.index >= cutoff]
 
 def find_trigger(df):
     """
-    Identify the trigger candle based on wick-break logic:
-    - Determine direction of previous candle (up/down)
-    - If up and current close > previous high, trigger
-    - If down and current close < previous low, trigger
+    Returns (trigger_time, direction) if a wick‑break trigger is found.
     """
     df2 = filter_bars(df)
     for i in range(1, len(df2)):
-        prev = df2.iloc[i-1]
-        curr = df2.iloc[i]
+        prev, curr = df2.iloc[i-1], df2.iloc[i]
         direction = 'up' if prev.close > prev.open else 'down'
         if direction == 'up' and curr.close > prev.high:
-            return df2.index[i]
+            return df2.index[i], direction
         if direction == 'down' and curr.close < prev.low:
-            return df2.index[i]
-    return None
+            return df2.index[i], direction
+    return None, None
 
-def calculate_contracts(price_usd):
-    """
-    Dynamic sizing: $10,000 position divided by (price * 100 shares per contract).
-    Returns integer number of contracts.
-    """
-    if price_usd <= 0:
+def calculate_contracts(price):
+    if price <= 0:
         return 0
-    return int(10000 / (price_usd * 100))
+    return int(POSITION_USD / (price * 100))
 
+def select_option(ib, direction):
+    """
+    Chooses next‑day expiring CALL (up) or PUT (down), ≤ $1 OTM.
+    """
+    stock = Stock(SYMBOL, 'SMART', 'USD')
+    ticker = ib.reqMktData(stock)
+    ib.sleep(1)
+    price = ticker.last
 
-# ---------------------- Testing Milestone 1 ----------------------
+    local = pytz.timezone(TIMEZONE)
+    today = datetime.now(local).date()
+    exp = today + timedelta(days=EXP_DAYS_AHEAD)
+    exp_str = exp.strftime('%Y%m%d')
+
+    if direction == 'up':
+        strike = math.ceil(price)
+        right = 'CALL'
+    else:
+        strike = math.floor(price)
+        right = 'PUT'
+
+    if abs(strike - price) > OTM_THRESHOLD:
+        strike = int(price) + (1 if direction == 'up' else -1)
+
+    return Option(SYMBOL, exp_str, strike, right, 'SMART')
+
+def place_entry(ib, contract, qty):
+    if qty < 1:
+        print("Quantity < 1 → no order placed")
+        return
+    order = MarketOrder('BUY', qty)
+    ib.placeOrder(contract, order)
+    ib.sleep(1)
+    print(f"Placed BUY order: {qty} contracts of {contract.symbol} {contract.strike} {contract.right}")
+
+def run_strategy():
+    ib = connect_ib()
+    df = get_5min_bars(ib)
+    trigger_time, direction = find_trigger(df)
+    if not trigger_time:
+        print("No trigger found")
+        return
+    print(f"Trigger at {trigger_time}, direction: {direction}")
+
+    contract = select_option(ib, direction)
+    ticker = ib.reqMktData(contract)
+    ib.sleep(1)
+    price = ticker.last
+
+    qty = calculate_contracts(price)
+    place_entry(ib, contract, qty)
 
 if __name__ == "__main__":
-    # Synthetic 5-min bar data (timestamps in UTC for simplicity)
+    # — Milestone 1 Test —
+    print("\n--- Milestone 1 Test ---")
     times = pd.date_range(start="2025-04-21 07:00", periods=6, freq="5T", tz="UTC")
     data = {
         'open':  [100, 102, 104, 103, 105, 106],
@@ -50,13 +126,23 @@ if __name__ == "__main__":
         'low':   [99, 101, 103, 102, 104, 105],
         'close': [102, 104, 103, 105, 107, 106]
     }
-    df = pd.DataFrame(data, index=times)
+    df_test = pd.DataFrame(data, index=times)
+    trig, dirn = find_trigger(df_test)
+    print(f"Trigger at: {trig} (direction: {dirn})")
+    print("Contracts @ $2.5:", calculate_contracts(2.5))
 
-    # 1. Trigger detection test
-    trigger = find_trigger(df)
-    print("Trigger found at:", trigger)        # Expect 2025-04-21 07:20:00+00:00
+    # — Milestone 2 Dummy IB Test —
+    print("\n--- Milestone 2 Dummy IB Test ---")
+    class DummyIB:
+        def reqMktData(self, contract): return type('T',(object,),{'last':2.5})()
+        def sleep(self, t=0): pass
+        def placeOrder(self, c, o): return o
 
-    # 2. Contract sizing tests
-    print("\nContract sizing tests:")
-    for price in [2.5, 0, -1]:
-        print(f"  Price = {price} → Contracts = {calculate_contracts(price)}")
+    ib_dummy = DummyIB()
+    opt = select_option(ib_dummy, 'up')
+    print("Selected option:", opt)
+    qty = calculate_contracts(2.5)
+    place_entry(ib_dummy, opt, qty)
+
+    # To run live, uncomment the next line:
+    # run_strategy()
