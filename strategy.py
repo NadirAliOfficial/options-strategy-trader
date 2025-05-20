@@ -3,7 +3,7 @@ import math
 import pytz
 import logging
 import ctypes
-import winsound
+# import winsound
 from datetime import datetime, timedelta, time
 from ib_insync import IB, Stock, Option, MarketOrder, LimitOrder, util
 
@@ -35,10 +35,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-def alert_user(title, msg):
-    """Show Windows pop-up and beep on trigger."""
-    ctypes.windll.user32.MessageBoxW(0, msg, title, 0x1000)
-    winsound.Beep(1000, 300)
+# def alert_user(title, msg):
+#     """Show Windows pop-up and beep on trigger."""
+#     ctypes.windll.user32.MessageBoxW(0, msg, title, 0x1000)
+#     winsound.Beep(1000, 300)
 
 def connect_ib():
     ib = IB()
@@ -147,7 +147,7 @@ def run_strategy():
 
             # alert and log trigger
             local_time = t_time.astimezone(tz).strftime('%H:%M:%S %Z')
-            alert_user("Trading Bot Trigger", f"{sym} {direction.upper()} @ {local_time}")
+            # alert_user("Trading Bot Trigger", f"{sym} {direction.upper()} @ {local_time}")
             logging.info(f"{sym} trigger at {t_time}, dir={direction}")
 
             contract = select_option(ib, sym, direction, bars)
